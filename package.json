@@ -1,6 +1,6 @@
 {
   "name": "serverless-dynamodb-to-eventbridge-plugin",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Serverless framework plugin for converting DynamoDB events into events in EventBridge.",
   "main": "index.js",
   "dependencies": {

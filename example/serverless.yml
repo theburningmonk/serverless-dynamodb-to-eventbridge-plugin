@@ -4,12 +4,6 @@ frameworkVersion: '2'
 plugins:
   - ./../index
 
-custom:
-  DynamoDbToEventBridgePlugin:
-    exclude: 
-      - Table
-    eventBusName: !Ref EventBus
-
 provider:
   name: aws
   runtime: nodejs12.x

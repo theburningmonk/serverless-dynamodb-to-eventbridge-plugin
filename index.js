@@ -19,8 +19,8 @@ class DynamoDbToEventBridgePlugin {
 		this.region = this.serverless.providers.aws.options.region;
 		const template = this.serverless.service.provider.compiledCloudFormationTemplate;
 
-		const config = _.get(this.serverless.service, "custom.DynamoDbToEventBridgePlugin");
-		this.eventBusName = config.eventBusName;
+		const config = _.get(this.serverless.service, "custom.DynamoDbToEventBridgePlugin", {});
+		this.eventBusName = config.eventBusName || "default";
 		this.startingPosition = config.startingPosition || "TRIM_HORIZON";
 		const excludeList = config.exclude || [];
 
