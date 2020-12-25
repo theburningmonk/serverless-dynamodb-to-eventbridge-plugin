@@ -1,0 +1,60 @@
+service: example
+frameworkVersion: '2'
+
+plugins:
+  - ./../index
+
+custom:
+  DynamoDbToEventBridgePlugin:
+    exclude: 
+      - Table
+    eventBusName: !Ref EventBus
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: ${opt:stage, 'dev'}
+
+functions:
+  hello:
+    handler: handler.hello
+
+resources:
+  Resources:
+    Table:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+
+    Table2:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+
+    Table3:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+
+    EventBus:
+      Type: AWS::Events::EventBus
+      Properties:
+        Name: mybus_${self:provider.stage}

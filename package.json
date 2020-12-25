@@ -1,0 +1,57 @@
+{
+  "name": "serverless-dynamodb-to-eventbridge-plugin",
+  "version": "1.0.0",
+  "description": "Serverless framework plugin for converting DynamoDB events into events in EventBridge.",
+  "main": "index.js",
+  "dependencies": {
+    "lodash": "^4.17.20"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^8.0.0",
+    "@commitlint/config-conventional": "^8.0.0",
+    "coveralls": "^3.0.2",
+    "eslint": "^5.13.0",
+    "eslint-config-prettier": "^6.0.0",
+    "eslint-config-standard": "^12.0.0",
+    "eslint-plugin-import": "^2.16.0",
+    "eslint-plugin-node": "^9.1.0",
+    "eslint-plugin-promise": "^4.0.1",
+    "eslint-plugin-standard": "^4.0.0",
+    "husky": "^3.0.0",
+    "jest": "^24.8.0",
+    "lint-staged": "^9.1.0",
+    "prettier": "^1.18.2"
+  },
+  "scripts": {
+    "test:lint": "eslint .",
+    "prettier:ci": "prettier --print-width 120 --list-different \"**/*.js\"",
+    "prettier:fix": "prettier --print-width 120 --write \"./**/*.js\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theburningmonk/serverless-dynamodb-to-eventbridge-plugin.git"
+  },
+  "keywords": [],
+  "author": "Yan Cui",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/theburningmonk/serverless-dynamodb-to-eventbridge-plugin/issues"
+  },
+  "homepage": "https://github.com/theburningmonk/serverless-dynamodb-to-eventbridge-plugin#readme",
+  "prettier": {
+    "useTabs": true,
+    "tabWidth": 4,
+    "printWidth": 120
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged",
+      "commit-msg": "commitlint -E HUSKY_GIT_PARAMS"
+    }
+  },
+  "lint-staged": {
+    "*.js": [
+      "eslint"
+    ]
+  }
+}
