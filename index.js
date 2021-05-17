@@ -56,12 +56,21 @@ class DynamoDbToEventBridgePlugin {
 
 	generateResources(ddbTableLogicalIds) {
 		return _.flatMap(ddbTableLogicalIds, ddbTableLogicalId => {
+			const dynamoDb = this.serverless.service.resources.Resources[ddbTableLogicalId];
+			const sseEnabled = _.get(dynamoDb, "Properties.SSESpecification.SSEEnabled", false);
+			const kmsKeyId = _.get(dynamoDb, "Properties.SSESpecification.KMSMasterKeyId");
+
+			if (sseEnabled) {
+				this.log(`${ddbTableLogicalId} sseEnabled: [${sseEnabled}]`);
+				this.log(`${ddbTableLogicalId} KMS id: [${kmsKeyId}]`);
+			}
+
 			const prefix = `DynamoDbToEventBridge${ddbTableLogicalId}`;
-			const functionName = `${this.service}-${this.stage}-DynamoDB-to-EventBridge-${ddbTableLogicalId}`;
+			const functionName = `${this.service}-${this.stage}-DynamoDB-to-EventBridge-${ddbTableLogicalId}`.substr(0, 64);
 			const logGroupLogicalId = `${prefix}LogGroup`;
 			const logGroup = this.generateLogGroup(functionName);
 			const iamRoleLogicalId = `${prefix}LambdaExecution`;
-			const iamRole = this.generateIamRole(ddbTableLogicalId, logGroupLogicalId);
+			const iamRole = this.generateIamRole(ddbTableLogicalId, logGroupLogicalId, kmsKeyId);
 			const lambdaFunctionLogicalId = `${prefix}LambdaFunction`;
 			const lambdaFunction = this.generateLambdaFunction(functionName, iamRoleLogicalId);
 			const eventSourceMappingLogicalId = `${prefix}EventSourceMapping`;
@@ -90,10 +99,49 @@ class DynamoDbToEventBridgePlugin {
 		};
 	}
 
-	generateIamRole(ddbTableLogicalId, logGroupLogicalId) {
+	generateIamRole(ddbTableLogicalId, logGroupLogicalId, kmsKeyId) {
 		const eventBusArn = this.eventBusName.Ref
 			? { "Fn::GetAtt": [this.eventBusName.Ref, "Arn"] }
 			: { "Fn::Sub": `arn:aws:events:\${AWS::Region}:\${AWS::AccountId}:event-bus/${this.eventBusName}` };
+
+		const statements = [
+			{
+				Effect: "Allow",
+				Action: ["logs:CreateLogStream", "logs:PutLogEvents"],
+				Resource: [
+					{
+						"Fn::Sub": `\${${logGroupLogicalId}.Arn}:*:*`
+					}
+				]
+			},
+			{
+				Effect: "Allow",
+				Action: [
+					"dynamodb:GetRecords",
+					"dynamodb:GetShardIterator",
+					"dynamodb:DescribeStream",
+					"dynamodb:ListStreams"
+				],
+				Resource: [
+					{
+						"Fn::GetAtt": [ddbTableLogicalId, "StreamArn"]
+					}
+				]
+			},
+			{
+				Effect: "Allow",
+				Action: "events:PutEvents",
+				Resource: eventBusArn
+			}
+		];
+
+		if (kmsKeyId) {
+			statements.push({
+				Effect: "Allow",
+				Action: "kms:Decrypt",
+				Resource: kmsKeyId
+			});
+		}
 
 		return {
 			Type: "AWS::IAM::Role",
@@ -118,36 +166,7 @@ class DynamoDbToEventBridgePlugin {
 						PolicyName: "lambda",
 						PolicyDocument: {
 							Version: "2012-10-17",
-							Statement: [
-								{
-									Effect: "Allow",
-									Action: ["logs:CreateLogStream", "logs:PutLogEvents"],
-									Resource: [
-										{
-											"Fn::Sub": `\${${logGroupLogicalId}.Arn}:*:*`
-										}
-									]
-								},
-								{
-									Effect: "Allow",
-									Action: [
-										"dynamodb:GetRecords",
-										"dynamodb:GetShardIterator",
-										"dynamodb:DescribeStream",
-										"dynamodb:ListStreams"
-									],
-									Resource: [
-										{
-											"Fn::GetAtt": [ddbTableLogicalId, "StreamArn"]
-										}
-									]
-								},
-								{
-									Effect: "Allow",
-									Action: "events:PutEvents",
-									Resource: [eventBusArn]
-								}
-							]
+							Statement: statements
 						}
 					}
 				]
