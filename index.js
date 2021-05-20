@@ -23,6 +23,8 @@ class DynamoDbToEventBridgePlugin {
 		this.eventBusName = config.eventBusName || "default";
 		this.startingPosition = config.startingPosition || "TRIM_HORIZON";
 		const excludeList = config.exclude || [];
+		this.permissionsBoundary = config.permissionsBoundary;
+		this.streamViewType = config.streamViewType || "NEW_AND_OLD_IMAGES";
 
 		const resources = this.serverless.service.resources.Resources;
 		const ddbTableLogicalIds = Object.keys(resources)
@@ -44,12 +46,12 @@ class DynamoDbToEventBridgePlugin {
 
 	enableStreams(ddbTableLogicalIds) {
 		for (const logicalId of ddbTableLogicalIds) {
-			this.log(`enabling StreamSpecification on [${logicalId}] (NEW_AND_OLD_IMAGES)`);
+			this.log(`enabling StreamSpecification on [${logicalId}] (${this.streamViewType})`);
 
 			const { Resources } = this.serverless.service.resources;
 			const ddbTable = Resources[logicalId];
 			ddbTable.Properties.StreamSpecification = {
-				StreamViewType: "NEW_AND_OLD_IMAGES"
+				StreamViewType: this.streamViewType
 			};
 		}
 	}
@@ -161,6 +163,7 @@ class DynamoDbToEventBridgePlugin {
 				Path: "/",
 				RoleName: `${this.service}-${this.stage}-DDB2EB-${ddbTableLogicalId}`,
 				ManagedPolicyArns: [],
+				PermissionsBoundary: this.permissionsBoundary,
 				Policies: [
 					{
 						PolicyName: "lambda",

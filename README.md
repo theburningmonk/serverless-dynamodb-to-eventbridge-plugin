@@ -63,4 +63,6 @@ custom:
       - LogicalId
     eventBusName: String | { !Ref LogicalId } # optional
     startingPosition: LATEST | TRIM_HORIZON # optional (default TRIM_HORIZON)
+    permissionsBoundary: String | { !Sub etc } # optional (default undefined)
+    streamViewType: KEYS_ONLY | NEW_AND_OLD_IMAGES | NEW_IMAGE | OLD_IMAGE # optional (default NEW_AND_OLD_IMAGES)
 ```
