@@ -33,7 +33,7 @@
   },
   "keywords": [],
   "author": "Yan Cui",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/theburningmonk/serverless-dynamodb-to-eventbridge-plugin/issues"
   },
