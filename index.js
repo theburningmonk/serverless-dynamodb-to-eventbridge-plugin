@@ -146,22 +146,6 @@ class DynamoDbToEventBridgePlugin {
       });
     }
 
-    if (this.configureVpc) {
-      statements.push({
-        Effect: "Allow",
-        Action: "ec2:CreateNetworkInterface",
-        Resource: { "Fn::Sub": "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*" }
-      }, {
-        Effect: "Allow",
-        Action: "ec2:DescribeNetworkInterfaces",
-        Resource: { "Fn::Sub": "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*/*" }
-      }, {
-        Effect: "Allow",
-        Action: "ec2:DeleteNetworkInterface",
-        Resource: { "Fn::Sub": "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*/*" }
-      });
-    }
-
     return {
       Type: "AWS::IAM::Role",
       Properties: {
@@ -179,7 +163,9 @@ class DynamoDbToEventBridgePlugin {
         },
         Path: "/",
         RoleName: `${this.service}-${this.stage}-DDB2EB-${ddbTableLogicalId}`,
-        ManagedPolicyArns: [],
+        ManagedPolicyArns: this.configureVpc
+          ? ["arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"]
+          : [],
         PermissionsBoundary: this.permissionsBoundary,
         Policies: [
           {
