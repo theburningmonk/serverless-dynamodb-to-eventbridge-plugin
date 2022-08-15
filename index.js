@@ -1,189 +1,206 @@
 const _ = require("lodash");
 
 class DynamoDbToEventBridgePlugin {
-	constructor(serverless) {
-		this.serverless = serverless;
-		this.log = (msg, ...args) => serverless.cli.consoleLog(`dynamodb-to-eventbridge: ${msg}`, ...args);
-		this.service = this.serverless.service.service;
-		this.naming = this.serverless.providers.aws.naming;
+  constructor(serverless) {
+    this.serverless = serverless;
+    this.log = (msg, ...args) => serverless.cli.consoleLog(`dynamodb-to-eventbridge: ${msg}`, ...args);
+    this.service = this.serverless.service.service;
+    this.naming = this.serverless.providers.aws.naming;
 
-		// see https://gist.github.com/HyperBrain/50d38027a8f57778d5b0f135d80ea406
-		// for available lifecycle hooks
-		this.hooks = {
-			"after:package:compileEvents": this.execute.bind(this)
-		};
-	}
+    // see https://gist.github.com/HyperBrain/50d38027a8f57778d5b0f135d80ea406
+    // for available lifecycle hooks
+    this.hooks = {
+      "after:package:compileEvents": this.execute.bind(this)
+    };
+  }
 
-	execute() {
-		this.stage = this.serverless.providers.aws.options.stage;
-		this.region = this.serverless.providers.aws.options.region;
-		const template = this.serverless.service.provider.compiledCloudFormationTemplate;
+  execute() {
+    this.stage = this.serverless.providers.aws.options.stage;
+    this.region = this.serverless.providers.aws.options.region;
+    const template = this.serverless.service.provider.compiledCloudFormationTemplate;
 
-		const config = _.get(this.serverless.service, "custom.DynamoDbToEventBridgePlugin", {});
-		this.eventBusName = config.eventBusName || "default";
-		this.startingPosition = config.startingPosition || "TRIM_HORIZON";
-		const excludeList = config.exclude || [];
-		this.permissionsBoundary = config.permissionsBoundary;
-		this.streamViewType = config.streamViewType || "NEW_AND_OLD_IMAGES";
+    const config = _.get(this.serverless.service, "custom.DynamoDbToEventBridgePlugin", {});
+    this.eventBusName = config.eventBusName || "default";
+    this.startingPosition = config.startingPosition || "TRIM_HORIZON";
+    const excludeList = config.exclude || [];
+    this.permissionsBoundary = config.permissionsBoundary;
+    this.streamViewType = config.streamViewType || "NEW_AND_OLD_IMAGES";
+    this.configureVpc = config.configureVpc || false;
 
-		const resources = this.serverless.service.resources.Resources;
-		const ddbTableLogicalIds = Object.keys(resources)
-			.filter(x => resources[x].Type === "AWS::DynamoDB::Table")
-			.filter(x => !excludeList.includes(x));
+    const resources = this.serverless.service.resources.Resources;
+    const ddbTableLogicalIds = Object.keys(resources)
+      .filter(x => resources[x].Type === "AWS::DynamoDB::Table")
+      .filter(x => !excludeList.includes(x));
 
-		if (_.isEmpty(ddbTableLogicalIds)) {
-			this.log("No DynamoDB tables found (or they're all excluded), skipping...");
-			return;
-		}
+    if (_.isEmpty(ddbTableLogicalIds)) {
+      this.log("No DynamoDB tables found (or they're all excluded), skipping...");
+      return;
+    }
 
-		this.enableStreams(ddbTableLogicalIds);
+    this.enableStreams(ddbTableLogicalIds);
 
-		const newResources = this.generateResources(ddbTableLogicalIds);
-		for (const [logicalId, resource] of newResources) {
-			template.Resources[logicalId] = resource;
-		}
-	}
+    const newResources = this.generateResources(ddbTableLogicalIds);
+    for (const [logicalId, resource] of newResources) {
+      template.Resources[logicalId] = resource;
+    }
+  }
 
-	enableStreams(ddbTableLogicalIds) {
-		for (const logicalId of ddbTableLogicalIds) {
-			this.log(`enabling StreamSpecification on [${logicalId}] (${this.streamViewType})`);
+  enableStreams(ddbTableLogicalIds) {
+    for (const logicalId of ddbTableLogicalIds) {
+      this.log(`enabling StreamSpecification on [${logicalId}] (${this.streamViewType})`);
 
-			const { Resources } = this.serverless.service.resources;
-			const ddbTable = Resources[logicalId];
-			ddbTable.Properties.StreamSpecification = {
-				StreamViewType: this.streamViewType
-			};
-		}
-	}
+      const { Resources } = this.serverless.service.resources;
+      const ddbTable = Resources[logicalId];
+      ddbTable.Properties.StreamSpecification = {
+        StreamViewType: this.streamViewType
+      };
+    }
+  }
 
-	generateResources(ddbTableLogicalIds) {
-		return _.flatMap(ddbTableLogicalIds, ddbTableLogicalId => {
-			const dynamoDb = this.serverless.service.resources.Resources[ddbTableLogicalId];
-			const sseEnabled = _.get(dynamoDb, "Properties.SSESpecification.SSEEnabled", false);
-			const kmsKeyId = _.get(dynamoDb, "Properties.SSESpecification.KMSMasterKeyId");
+  generateResources(ddbTableLogicalIds) {
+    return _.flatMap(ddbTableLogicalIds, ddbTableLogicalId => {
+      const dynamoDb = this.serverless.service.resources.Resources[ddbTableLogicalId];
+      const sseEnabled = _.get(dynamoDb, "Properties.SSESpecification.SSEEnabled", false);
+      const kmsKeyId = _.get(dynamoDb, "Properties.SSESpecification.KMSMasterKeyId");
 
-			if (sseEnabled) {
-				this.log(`${ddbTableLogicalId} sseEnabled: [${sseEnabled}]`);
-				this.log(`${ddbTableLogicalId} KMS id: [${kmsKeyId}]`);
-			}
+      if (sseEnabled) {
+        this.log(`${ddbTableLogicalId} sseEnabled: [${sseEnabled}]`);
+        this.log(`${ddbTableLogicalId} KMS id: [${kmsKeyId}]`);
+      }
 
-			const prefix = `DynamoDbToEventBridge${ddbTableLogicalId}`;
-			const functionName = `${this.service}-${this.stage}-DynamoDB-to-EventBridge-${ddbTableLogicalId}`.substr(0, 64);
-			const logGroupLogicalId = `${prefix}LogGroup`;
-			const logGroup = this.generateLogGroup(functionName);
-			const iamRoleLogicalId = `${prefix}LambdaExecution`;
-			const iamRole = this.generateIamRole(ddbTableLogicalId, logGroupLogicalId, kmsKeyId);
-			const lambdaFunctionLogicalId = `${prefix}LambdaFunction`;
-			const lambdaFunction = this.generateLambdaFunction(functionName, iamRoleLogicalId);
-			const eventSourceMappingLogicalId = `${prefix}EventSourceMapping`;
-			const eventSourceMapping = this.generateEventSourceMapping(
-				ddbTableLogicalId,
-				lambdaFunctionLogicalId,
-				iamRoleLogicalId
-			);
+      const prefix = `DynamoDbToEventBridge${ddbTableLogicalId}`;
+      const functionName = `${this.service}-${this.stage}-DynamoDB-to-EventBridge-${ddbTableLogicalId}`.substr(0, 64);
+      const logGroupLogicalId = `${prefix}LogGroup`;
+      const logGroup = this.generateLogGroup(functionName);
+      const iamRoleLogicalId = `${prefix}LambdaExecution`;
+      const iamRole = this.generateIamRole(ddbTableLogicalId, logGroupLogicalId, kmsKeyId);
+      const lambdaFunctionLogicalId = `${prefix}LambdaFunction`;
+      const lambdaFunction = this.generateLambdaFunction(functionName, iamRoleLogicalId);
+      const eventSourceMappingLogicalId = `${prefix}EventSourceMapping`;
+      const eventSourceMapping = this.generateEventSourceMapping(
+        ddbTableLogicalId,
+        lambdaFunctionLogicalId,
+        iamRoleLogicalId
+      );
 
-			// [logicalId, resource]
-			return [
-				[logGroupLogicalId, logGroup],
-				[iamRoleLogicalId, iamRole],
-				[lambdaFunctionLogicalId, lambdaFunction],
-				[eventSourceMappingLogicalId, eventSourceMapping]
-			];
-		});
-	}
+      // [logicalId, resource]
+      return [
+        [logGroupLogicalId, logGroup],
+        [iamRoleLogicalId, iamRole],
+        [lambdaFunctionLogicalId, lambdaFunction],
+        [eventSourceMappingLogicalId, eventSourceMapping]
+      ];
+    });
+  }
 
-	generateLogGroup(functionName) {
-		return {
-			Type: "AWS::Logs::LogGroup",
-			Properties: {
-				LogGroupName: this.naming.getLogGroupName(functionName)
-			}
-		};
-	}
+  generateLogGroup(functionName) {
+    return {
+      Type: "AWS::Logs::LogGroup",
+      Properties: {
+        LogGroupName: this.naming.getLogGroupName(functionName)
+      }
+    };
+  }
 
-	generateIamRole(ddbTableLogicalId, logGroupLogicalId, kmsKeyId) {
-		const eventBusArn = this.eventBusName.Ref
-			? { "Fn::GetAtt": [this.eventBusName.Ref, "Arn"] }
-			: { "Fn::Sub": `arn:aws:events:\${AWS::Region}:\${AWS::AccountId}:event-bus/${this.eventBusName}` };
+  generateIamRole(ddbTableLogicalId, logGroupLogicalId, kmsKeyId) {
+    const eventBusArn = this.eventBusName.Ref
+      ? { "Fn::GetAtt": [this.eventBusName.Ref, "Arn"] }
+      : { "Fn::Sub": `arn:aws:events:\${AWS::Region}:\${AWS::AccountId}:event-bus/${this.eventBusName}` };
 
-		const statements = [
-			{
-				Effect: "Allow",
-				Action: ["logs:CreateLogStream", "logs:PutLogEvents"],
-				Resource: [
-					{
-						"Fn::Sub": `\${${logGroupLogicalId}.Arn}:*:*`
-					}
-				]
-			},
-			{
-				Effect: "Allow",
-				Action: [
-					"dynamodb:GetRecords",
-					"dynamodb:GetShardIterator",
-					"dynamodb:DescribeStream",
-					"dynamodb:ListStreams"
-				],
-				Resource: [
-					{
-						"Fn::GetAtt": [ddbTableLogicalId, "StreamArn"]
-					}
-				]
-			},
-			{
-				Effect: "Allow",
-				Action: "events:PutEvents",
-				Resource: eventBusArn
-			}
-		];
+    const statements = [
+      {
+        Effect: "Allow",
+        Action: ["logs:CreateLogStream", "logs:PutLogEvents"],
+        Resource: [
+          {
+            "Fn::Sub": `\${${logGroupLogicalId}.Arn}:*:*`
+          }
+        ]
+      },
+      {
+        Effect: "Allow",
+        Action: [
+          "dynamodb:GetRecords",
+          "dynamodb:GetShardIterator",
+          "dynamodb:DescribeStream",
+          "dynamodb:ListStreams"
+        ],
+        Resource: [
+          {
+            "Fn::GetAtt": [ddbTableLogicalId, "StreamArn"]
+          }
+        ]
+      },
+      {
+        Effect: "Allow",
+        Action: "events:PutEvents",
+        Resource: eventBusArn
+      }
+    ];
 
-		if (kmsKeyId) {
-			statements.push({
-				Effect: "Allow",
-				Action: "kms:Decrypt",
-				Resource: kmsKeyId
-			});
-		}
+    if (kmsKeyId) {
+      statements.push({
+        Effect: "Allow",
+        Action: "kms:Decrypt",
+        Resource: kmsKeyId
+      });
+    }
 
-		return {
-			Type: "AWS::IAM::Role",
-			Properties: {
-				AssumeRolePolicyDocument: {
-					Version: "2012-10-17",
-					Statement: [
-						{
-							Effect: "Allow",
-							Principal: {
-								Service: ["lambda.amazonaws.com"]
-							},
-							Action: ["sts:AssumeRole"]
-						}
-					]
-				},
-				Path: "/",
-				RoleName: `${this.service}-${this.stage}-DDB2EB-${ddbTableLogicalId}`,
-				ManagedPolicyArns: [],
-				PermissionsBoundary: this.permissionsBoundary,
-				Policies: [
-					{
-						PolicyName: "lambda",
-						PolicyDocument: {
-							Version: "2012-10-17",
-							Statement: statements
-						}
-					}
-				]
-			}
-		};
-	}
+    if (this.configureVpc) {
+      statements.push({
+        Effect: "Allow",
+        Action: "ec2:CreateNetworkInterface",
+        Resource: "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*/*"
+      }, {
+        Effect: "Allow",
+        Action: "ec2:DescribeNetworkInterfaces",
+        Resource: "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*/*"
+      }, {
+        Effect: "Allow",
+        Action: "ec2:DeleteNetworkInterface",
+        Resource: "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*/*"
+      });
+    }
 
-	generateLambdaFunction(functionName, iamRoleLogicalId) {
-		return {
-			Type: "AWS::Lambda::Function",
-			DependsOn: [iamRoleLogicalId],
-			Properties: {
-				Code: {
-					ZipFile: `
+    return {
+      Type: "AWS::IAM::Role",
+      Properties: {
+        AssumeRolePolicyDocument: {
+          Version: "2012-10-17",
+          Statement: [
+            {
+              Effect: "Allow",
+              Principal: {
+                Service: ["lambda.amazonaws.com"]
+              },
+              Action: ["sts:AssumeRole"]
+            }
+          ]
+        },
+        Path: "/",
+        RoleName: `${this.service}-${this.stage}-DDB2EB-${ddbTableLogicalId}`,
+        ManagedPolicyArns: [],
+        PermissionsBoundary: this.permissionsBoundary,
+        Policies: [
+          {
+            PolicyName: "lambda",
+            PolicyDocument: {
+              Version: "2012-10-17",
+              Statement: statements
+            }
+          }
+        ]
+      }
+    };
+  }
+
+  generateLambdaFunction(functionName, iamRoleLogicalId) {
+    return {
+      Type: "AWS::Lambda::Function",
+      DependsOn: [iamRoleLogicalId],
+      Properties: {
+        Code: {
+          ZipFile: `
 const DynamoDB = require('aws-sdk/clients/dynamodb')
 const EventBridge = require('aws-sdk/clients/eventbridge')
 const EventBridgeClient = new EventBridge()
@@ -278,43 +295,43 @@ for (const resource of entry.Resources) {
 return size
 }
           `
-				},
-				FunctionName: functionName,
-				Handler: "index.handler",
-				MemorySize: 256,
-				Runtime: "nodejs12.x",
-				Timeout: 10,
-				Environment: {
-					Variables: {
-						STAGE: this.stage,
-						AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1",
-						EVENT_BUS_NAME: this.eventBusName
-					}
-				},
-				Role: {
-					"Fn::GetAtt": [iamRoleLogicalId, "Arn"]
-				}
-			}
-		};
-	}
+        },
+        FunctionName: functionName,
+        Handler: "index.handler",
+        MemorySize: 256,
+        Runtime: "nodejs12.x",
+        Timeout: 10,
+        Environment: {
+          Variables: {
+            STAGE: this.stage,
+            AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1",
+            EVENT_BUS_NAME: this.eventBusName
+          }
+        },
+        Role: {
+          "Fn::GetAtt": [iamRoleLogicalId, "Arn"]
+        }
+      }
+    };
+  }
 
-	generateEventSourceMapping(ddbTableLogicalId, functionLogicalId, iamRoleLogicalId) {
-		return {
-			Type: "AWS::Lambda::EventSourceMapping",
-			DependsOn: [iamRoleLogicalId],
-			Properties: {
-				BatchSize: 10,
-				EventSourceArn: {
-					"Fn::GetAtt": [ddbTableLogicalId, "StreamArn"]
-				},
-				FunctionName: {
-					"Fn::GetAtt": [functionLogicalId, "Arn"]
-				},
-				StartingPosition: this.startingPosition,
-				Enabled: true
-			}
-		};
-	}
+  generateEventSourceMapping(ddbTableLogicalId, functionLogicalId, iamRoleLogicalId) {
+    return {
+      Type: "AWS::Lambda::EventSourceMapping",
+      DependsOn: [iamRoleLogicalId],
+      Properties: {
+        BatchSize: 10,
+        EventSourceArn: {
+          "Fn::GetAtt": [ddbTableLogicalId, "StreamArn"]
+        },
+        FunctionName: {
+          "Fn::GetAtt": [functionLogicalId, "Arn"]
+        },
+        StartingPosition: this.startingPosition,
+        Enabled: true
+      }
+    };
+  }
 }
 
 module.exports = DynamoDbToEventBridgePlugin;
