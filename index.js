@@ -164,7 +164,18 @@ class DynamoDbToEventBridgePlugin {
         Path: "/",
         RoleName: `${this.service}-${this.stage}-DDB2EB-${ddbTableLogicalId}`,
         ManagedPolicyArns: this.configureVpc
-          ? ["arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"]
+          ? [{
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+              ]
+            ]
+          }]
           : [],
         PermissionsBoundary: this.permissionsBoundary,
         Policies: [
