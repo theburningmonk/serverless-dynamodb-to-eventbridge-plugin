@@ -150,15 +150,15 @@ class DynamoDbToEventBridgePlugin {
       statements.push({
         Effect: "Allow",
         Action: "ec2:CreateNetworkInterface",
-        Resource: "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*"
+        Resource: { "Fn::Sub": "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*" }
       }, {
         Effect: "Allow",
         Action: "ec2:DescribeNetworkInterfaces",
-        Resource: "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*/*"
+        Resource: { "Fn::Sub": "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*/*" }
       }, {
         Effect: "Allow",
         Action: "ec2:DeleteNetworkInterface",
-        Resource: "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*/*"
+        Resource: { "Fn::Sub": "arn:aws:ec2:\${AWS::Region}:\${AWS::AccountId}:*/*" }
       });
     }
 
